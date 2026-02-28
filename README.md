@@ -36,16 +36,5 @@ Build output:
 artifacts/bin/WidescreenTools.dll
 ```
 
-## Release Packaging
-
-The GitHub Actions workflow:
-
-- builds on Windows
-- packages `WidescreenTools.dll` and `manifest.json`
-- publishes a GitHub release for tags like `v0.1.0`
-
-## Notes
-
-- No Terraria binaries are included in this repository.
-- The compiled mod runs against the real `Terraria` and `TerrariaModder.Core` assemblies provided by the game and loader at runtime.
-
+## Credits
+Thank you to Star-F0rce for their [patching tool](https://github.com/Star-F0rce/terraria-145-widescreen) that inspired the zoom patching in this mod 
