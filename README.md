@@ -38,3 +38,5 @@ artifacts/bin/WidescreenTools.dll
 
 ## Credits
 Thank you to Star-F0rce for their [patching tool](https://github.com/Star-F0rce/terraria-145-widescreen) that inspired the zoom patching in this mod 
+
+OpenAI Codex CLI tool with OpenAI Codex 5.3 was also used to help code this mod.
