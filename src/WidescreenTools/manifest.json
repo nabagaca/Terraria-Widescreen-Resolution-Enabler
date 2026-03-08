@@ -18,6 +18,20 @@
       "label": "Override Forced Zoom",
       "description": "Replace Terraria's vanilla world-view limit used to force zoom on large resolutions"
     },
+    "enableCustomZoomRange": {
+      "type": "bool",
+      "default": false,
+      "label": "Enable Custom Zoom Range",
+      "description": "Allow zooming beyond Terraria's default 100%-200% target range"
+    },
+    "zoomRangeMultiplier": {
+      "type": "float",
+      "default": 1.0,
+      "min": 1.0,
+      "max": 4.0,
+      "label": "Zoom Range Multiplier",
+      "description": "Range size multiplier around vanilla zoom range; 2.0 gives roughly 50%-250%"
+    },
     "unlockHighResModes": {
       "type": "bool",
       "default": true,

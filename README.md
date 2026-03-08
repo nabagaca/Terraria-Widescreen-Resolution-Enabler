@@ -4,6 +4,7 @@
 
 - unlocks high and ultrawide display modes in Terraria's resolution list
 - relaxes Terraria's forced minimum zoom on wide resolutions
+- optionally expands the vanilla zoom slider range with a configurable multiplier
 - persists the selected high-resolution mode across launches
 
 ## Runtime Requirements
@@ -34,6 +35,14 @@ Build output:
 
 ```text
 artifacts/bin/WidescreenTools.dll
+```
+
+Default build deploys to TerrariaModder mods folder.
+
+Opt out of deploy during build:
+
+```powershell
+dotnet build src/WidescreenTools/WidescreenTools.csproj -c Release -p:EnableTerrariaModderDeploy=false
 ```
 
 ## Credits
