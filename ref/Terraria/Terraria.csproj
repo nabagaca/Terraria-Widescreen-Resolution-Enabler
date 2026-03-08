@@ -6,5 +6,8 @@
     <OutputType>Library</OutputType>
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
-</Project>
 
+  <ItemGroup>
+    <ProjectReference Include="..\Microsoft.Xna.Framework\Microsoft.Xna.Framework.csproj" />
+  </ItemGroup>
+</Project>

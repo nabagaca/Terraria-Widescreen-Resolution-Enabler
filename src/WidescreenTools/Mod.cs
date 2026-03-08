@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using Terraria;
 using TerrariaModder.Core;
 using TerrariaModder.Core.Events;
@@ -13,14 +14,17 @@ namespace WidescreenTools
 
         public string Id => "widescreen-tools";
         public string Name => "Widescreen Tools";
-        public string Version => "0.1.0";
+        public string Version => "0.3.0";
 
         private ILogger _log;
         private ModContext _context;
         private bool _enabled;
         private bool _overrideForcedMinimumZoom;
+        private bool _enableCustomZoomRange;
         private bool _unlockHighResModes;
         private bool _persistResolution;
+        private float _zoomRangeMultiplier;
+        private float _effectiveZoomRangeMultiplier = float.NaN;
         private int _desiredResolutionWidth;
         private int _desiredResolutionHeight;
         private int _worldViewWidth;
@@ -29,6 +33,20 @@ namespace WidescreenTools
         private bool _startupResolutionHandled;
         private int _lastObservedWidth;
         private int _lastObservedHeight;
+        private bool _resolutionOverridesApplied;
+        private bool _worldViewApplyDirty = true;
+        private bool _pendingResolutionSave;
+        private DateTime _lastResolutionChangeUtc;
+        private float _lastClampRequestedMultiplier = float.NaN;
+        private int _lastClampReferenceWidth = -1;
+        private int _lastClampReferenceHeight = -1;
+        private int _lastClampRenderTargetMax = -1;
+        private float _lastClampEffectiveMultiplier = float.NaN;
+        private float _lastClampMaxAllowedMultiplier = float.NaN;
+        private float _lastClampMinZoomLimit = float.NaN;
+        private int _lastAppliedWorldViewWidth = -1;
+        private int _lastAppliedWorldViewHeight = -1;
+        private MethodInfo _setResolutionMethod;
 
         public void Initialize(ModContext context)
         {
@@ -38,8 +56,8 @@ namespace WidescreenTools
 
             WidescreenZoomOverride.Initialize(_log);
             WidescreenResolutionOverride.Initialize(_log);
+            _setResolutionMethod = typeof(Main).GetMethod("SetResolution", new[] { typeof(int), typeof(int) });
             LoadConfigValues();
-            ApplyResolutionOverrides();
             FrameEvents.OnPostUpdate += OnPostUpdate;
 
             _log.Info($"{Name} v{Version} initialized");
@@ -47,10 +65,14 @@ namespace WidescreenTools
 
         public void OnWorldLoad()
         {
+            _pendingApply = true;
+            _worldViewApplyDirty = true;
         }
 
         public void OnWorldUnload()
         {
+            _pendingApply = true;
+            _worldViewApplyDirty = true;
         }
 
         public void Unload()
@@ -64,6 +86,7 @@ namespace WidescreenTools
         {
             LoadConfigValues();
             _pendingApply = true;
+            _worldViewApplyDirty = true;
         }
 
         private void OnPostUpdate()
@@ -75,6 +98,7 @@ namespace WidescreenTools
             }
 
             TrackResolutionChanges();
+            FlushPendingResolutionSave();
         }
 
         private void LoadConfigValues()
@@ -86,8 +110,10 @@ namespace WidescreenTools
 
             _enabled = _context.Config.Get("enabled", true);
             _overrideForcedMinimumZoom = _context.Config.Get("overrideForcedMinimumZoom", true);
+            _enableCustomZoomRange = _context.Config.Get("enableCustomZoomRange", false);
             _unlockHighResModes = _context.Config.Get("unlockHighResModes", true);
             _persistResolution = _context.Config.Get("persistResolution", true);
+            _zoomRangeMultiplier = _context.Config.Get("zoomRangeMultiplier", 1f);
             _desiredResolutionWidth = _context.Config.Get("desiredResolutionWidth", 0);
             _desiredResolutionHeight = _context.Config.Get("desiredResolutionHeight", 0);
             _worldViewWidth = _context.Config.Get("worldViewWidth", 5120);
@@ -106,30 +132,119 @@ namespace WidescreenTools
 
         private void ApplyConfiguredOverrides()
         {
-            ApplyResolutionOverrides();
+            ApplyResolutionOverrides(force: false);
             ApplySavedResolution();
+            ApplyEffectiveZoomRange();
 
             if (!_enabled || !_overrideForcedMinimumZoom)
             {
                 WidescreenZoomOverride.RestoreOriginal();
                 _log.Info("[WidescreenTools] Forced minimum zoom override disabled");
+                _worldViewApplyDirty = true;
                 return;
             }
 
-            if (WidescreenZoomOverride.Apply(_worldViewWidth, _worldViewHeight))
+            int worldViewWidth = _worldViewWidth;
+            int worldViewHeight = _worldViewHeight;
+            worldViewWidth = WidescreenZoomOverride.ExpandWorldViewWidthForZoom(worldViewWidth, Main.screenWidth);
+            worldViewHeight = WidescreenZoomOverride.ExpandWorldViewHeightForZoom(worldViewHeight, Main.screenHeight);
+
+            if (!_worldViewApplyDirty &&
+                _lastAppliedWorldViewWidth == worldViewWidth &&
+                _lastAppliedWorldViewHeight == worldViewHeight)
             {
-                _log.Info($"[WidescreenTools] Forced minimum zoom comparer set to {_worldViewWidth}x{_worldViewHeight}");
+                return;
+            }
+
+            if (WidescreenZoomOverride.Apply(worldViewWidth, worldViewHeight))
+            {
+                _worldViewApplyDirty = false;
+                if (_lastAppliedWorldViewWidth != worldViewWidth || _lastAppliedWorldViewHeight != worldViewHeight)
+                {
+                    _lastAppliedWorldViewWidth = worldViewWidth;
+                    _lastAppliedWorldViewHeight = worldViewHeight;
+                    _log.Info($"[WidescreenTools] Forced minimum zoom comparer set to {worldViewWidth}x{worldViewHeight}");
+                }
             }
         }
 
-        private void ApplyResolutionOverrides()
+        private void ApplyEffectiveZoomRange()
+        {
+            if (!_enabled || !_enableCustomZoomRange)
+            {
+                if (float.IsNaN(_effectiveZoomRangeMultiplier) || Math.Abs(_effectiveZoomRangeMultiplier - 1f) > 0.0001f)
+                {
+                    _effectiveZoomRangeMultiplier = 1f;
+                    WidescreenZoomOverride.ConfigureZoomRange(false, 1f);
+                }
+
+                return;
+            }
+
+            int clampReferenceWidth = Math.Max(Main.screenWidth, _desiredResolutionWidth);
+            int clampReferenceHeight = Math.Max(Main.screenHeight, _desiredResolutionHeight);
+            float requestedMultiplier = _zoomRangeMultiplier;
+            int renderTargetMax = WidescreenZoomOverride.GetCurrentRenderTargetMaxSize();
+            bool clampInputsChanged =
+                Math.Abs(_lastClampRequestedMultiplier - requestedMultiplier) > 0.0001f ||
+                _lastClampReferenceWidth != clampReferenceWidth ||
+                _lastClampReferenceHeight != clampReferenceHeight ||
+                _lastClampRenderTargetMax != renderTargetMax;
+
+            float effectiveMultiplier;
+            float maxAllowedMultiplier;
+            float minZoomLimit;
+            if (clampInputsChanged)
+            {
+                effectiveMultiplier = WidescreenZoomOverride.ClampMultiplierForCurrentResolution(
+                    requestedMultiplier,
+                    clampReferenceWidth,
+                    clampReferenceHeight,
+                    out maxAllowedMultiplier,
+                    out minZoomLimit);
+
+                _lastClampRequestedMultiplier = requestedMultiplier;
+                _lastClampReferenceWidth = clampReferenceWidth;
+                _lastClampReferenceHeight = clampReferenceHeight;
+                _lastClampRenderTargetMax = renderTargetMax;
+                _lastClampEffectiveMultiplier = effectiveMultiplier;
+                _lastClampMaxAllowedMultiplier = maxAllowedMultiplier;
+                _lastClampMinZoomLimit = minZoomLimit;
+            }
+            else
+            {
+                effectiveMultiplier = _lastClampEffectiveMultiplier;
+                maxAllowedMultiplier = _lastClampMaxAllowedMultiplier;
+                minZoomLimit = _lastClampMinZoomLimit;
+            }
+
+            if (effectiveMultiplier < requestedMultiplier - 0.0001f &&
+                (float.IsNaN(_effectiveZoomRangeMultiplier) || Math.Abs(_effectiveZoomRangeMultiplier - effectiveMultiplier) > 0.0001f))
+            {
+                _log.Info($"[WidescreenTools] Clamped zoomRangeMultiplier {requestedMultiplier:0.###} -> {effectiveMultiplier:0.###} for clamp reference {clampReferenceWidth}x{clampReferenceHeight} (min zoom limit ~{minZoomLimit:0.###}, max multiplier {maxAllowedMultiplier:0.###})");
+            }
+
+            _effectiveZoomRangeMultiplier = effectiveMultiplier;
+            WidescreenZoomOverride.ConfigureZoomRange(_enabled && _enableCustomZoomRange, effectiveMultiplier);
+        }
+
+        private void ApplyResolutionOverrides(bool force)
         {
             if (!_enabled || !_unlockHighResModes)
+            {
+                _resolutionOverridesApplied = false;
+                return;
+            }
+
+            if (!force && _resolutionOverridesApplied)
             {
                 return;
             }
 
-            WidescreenResolutionOverride.Apply();
+            if (WidescreenResolutionOverride.Apply())
+            {
+                _resolutionOverridesApplied = true;
+            }
         }
 
         private void ApplySavedResolution()
@@ -170,6 +285,24 @@ namespace WidescreenTools
 
         private void TrackResolutionChanges()
         {
+            if (Main.screenWidth <= 0 || Main.screenHeight <= 0)
+            {
+                return;
+            }
+
+            bool changed = Main.screenWidth != _lastObservedWidth || Main.screenHeight != _lastObservedHeight;
+            if (!changed)
+            {
+                return;
+            }
+
+            _lastObservedWidth = Main.screenWidth;
+            _lastObservedHeight = Main.screenHeight;
+            _pendingApply = true;
+            _worldViewApplyDirty = true;
+            _pendingResolutionSave = true;
+            _lastResolutionChangeUtc = DateTime.UtcNow;
+
             if (!_enabled || !_unlockHighResModes || !_persistResolution || _context?.Config == null)
             {
                 return;
@@ -180,19 +313,6 @@ namespace WidescreenTools
                 return;
             }
 
-            if (Main.screenWidth <= 0 || Main.screenHeight <= 0)
-            {
-                return;
-            }
-
-            if (Main.screenWidth == _lastObservedWidth && Main.screenHeight == _lastObservedHeight)
-            {
-                return;
-            }
-
-            _lastObservedWidth = Main.screenWidth;
-            _lastObservedHeight = Main.screenHeight;
-
             if (_desiredResolutionWidth == Main.screenWidth && _desiredResolutionHeight == Main.screenHeight)
             {
                 return;
@@ -200,6 +320,32 @@ namespace WidescreenTools
 
             _desiredResolutionWidth = Main.screenWidth;
             _desiredResolutionHeight = Main.screenHeight;
+        }
+
+        private void FlushPendingResolutionSave()
+        {
+            if (!_pendingResolutionSave)
+            {
+                return;
+            }
+
+            if ((DateTime.UtcNow - _lastResolutionChangeUtc).TotalMilliseconds < 500)
+            {
+                return;
+            }
+
+            _pendingResolutionSave = false;
+
+            if (!_enabled || !_unlockHighResModes || !_persistResolution || _context?.Config == null)
+            {
+                return;
+            }
+
+            if (!_startupResolutionHandled || _desiredResolutionWidth <= 0 || _desiredResolutionHeight <= 0)
+            {
+                return;
+            }
+
             _context.Config.Set("desiredResolutionWidth", _desiredResolutionWidth);
             _context.Config.Set("desiredResolutionHeight", _desiredResolutionHeight);
             _context.Config.Save();
@@ -210,14 +356,13 @@ namespace WidescreenTools
         {
             try
             {
-                var setResolution = typeof(Main).GetMethod("SetResolution", new[] { typeof(int), typeof(int) });
-                if (setResolution == null)
+                if (_setResolutionMethod == null)
                 {
                     _log.Warn("[WidescreenTools] Failed to find Main.SetResolution(int, int)");
                     return false;
                 }
 
-                setResolution.Invoke(null, new object[] { width, height });
+                _setResolutionMethod.Invoke(null, new object[] { width, height });
                 return true;
             }
             catch (Exception ex)
@@ -235,6 +380,11 @@ namespace WidescreenTools
             }
 
             ApplySavedResolution();
+        }
+
+        internal void NotifyResolutionOverridesApplied()
+        {
+            _resolutionOverridesApplied = true;
         }
 
         private static void SetPendingResolution(int width, int height)

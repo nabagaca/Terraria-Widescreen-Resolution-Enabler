@@ -23,7 +23,7 @@ jobs:
           dotnet-version: 8.0.x
 
       - name: Build
-        run: dotnet build src/WidescreenTools/WidescreenTools.csproj -c Release
+        run: dotnet build src/WidescreenTools/WidescreenTools.csproj -c Release -p:UseLocalTerrariaReferences=false -p:EnableTerrariaModderDeploy=false
 
       - name: Package
         shell: pwsh
