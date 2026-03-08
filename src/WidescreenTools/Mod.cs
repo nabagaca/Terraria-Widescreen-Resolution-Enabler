@@ -170,6 +170,17 @@ namespace WidescreenTools
 
         private void ApplyEffectiveZoomRange()
         {
+            if (!_enabled || !_enableCustomZoomRange)
+            {
+                if (float.IsNaN(_effectiveZoomRangeMultiplier) || Math.Abs(_effectiveZoomRangeMultiplier - 1f) > 0.0001f)
+                {
+                    _effectiveZoomRangeMultiplier = 1f;
+                    WidescreenZoomOverride.ConfigureZoomRange(false, 1f);
+                }
+
+                return;
+            }
+
             int clampReferenceWidth = Math.Max(Main.screenWidth, _desiredResolutionWidth);
             int clampReferenceHeight = Math.Max(Main.screenHeight, _desiredResolutionHeight);
             float requestedMultiplier = _zoomRangeMultiplier;

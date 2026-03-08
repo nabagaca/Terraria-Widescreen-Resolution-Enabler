@@ -186,6 +186,16 @@ namespace WidescreenTools.Patches
             return _customZoomRangeEnabled;
         }
 
+        public static bool HasExpandedZoomRange()
+        {
+            if (!_customZoomRangeEnabled)
+            {
+                return false;
+            }
+
+            return _zoomTargetMin < VanillaZoomMin - 0.0001f || _zoomTargetMax > VanillaZoomMax + 0.0001f;
+        }
+
         public static int GetCurrentRenderTargetMaxSize()
         {
             return GetRenderTargetMaxSize();

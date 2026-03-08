@@ -7,10 +7,15 @@ namespace WidescreenTools.Patches
     [HarmonyPatch(typeof(Main), "GetAreaToLight")]
     internal static class AreaToLightPatch
     {
+        private static int _cachedViewWidth = -1;
+        private static int _cachedViewHeight = -1;
+        private static int _cachedTargetTilesWide;
+        private static int _cachedTargetTilesHigh;
+
         [HarmonyPostfix]
         private static void GetAreaToLight_Postfix(ref Rectangle __result)
         {
-            if (!WidescreenZoomOverride.IsCustomZoomRangeEnabled())
+            if (!WidescreenZoomOverride.HasExpandedZoomRange())
             {
                 return;
             }
@@ -22,8 +27,9 @@ namespace WidescreenTools.Patches
                 return;
             }
 
-            int targetTilesWide = (int)System.Math.Ceiling(Main.MaxWorldViewSize.X / 16f) + 4;
-            int targetTilesHigh = (int)System.Math.Ceiling(Main.MaxWorldViewSize.Y / 16f) + 4;
+            UpdateCachedTileTargets();
+            int targetTilesWide = _cachedTargetTilesWide;
+            int targetTilesHigh = _cachedTargetTilesHigh;
             if (__result.Width >= targetTilesWide && __result.Height >= targetTilesHigh)
             {
                 return;
@@ -82,6 +88,21 @@ namespace WidescreenTools.Patches
             }
 
             __result = new Rectangle(left, top, right - left, bottom - top);
+        }
+
+        private static void UpdateCachedTileTargets()
+        {
+            int viewWidth = Main.MaxWorldViewSize.X;
+            int viewHeight = Main.MaxWorldViewSize.Y;
+            if (viewWidth == _cachedViewWidth && viewHeight == _cachedViewHeight)
+            {
+                return;
+            }
+
+            _cachedViewWidth = viewWidth;
+            _cachedViewHeight = viewHeight;
+            _cachedTargetTilesWide = (int)System.Math.Ceiling(viewWidth / 16f) + 4;
+            _cachedTargetTilesHigh = (int)System.Math.Ceiling(viewHeight / 16f) + 4;
         }
     }
 }

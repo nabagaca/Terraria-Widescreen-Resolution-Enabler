@@ -10,7 +10,7 @@ namespace WidescreenTools.Patches
     {
         private static void Prefix(SpriteViewMatrix __instance, ref Vector2 value)
         {
-            if (!WidescreenZoomOverride.IsCustomZoomRangeEnabled())
+            if (!WidescreenZoomOverride.HasExpandedZoomRange())
             {
                 return;
             }
