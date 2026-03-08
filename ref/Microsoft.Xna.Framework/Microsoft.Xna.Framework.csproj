@@ -1,9 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <TargetFramework>net48</TargetFramework>
-    <AssemblyName>Microsoft.Xna.Framework</AssemblyName>
-    <RootNamespace>Microsoft.Xna.Framework</RootNamespace>
-    <OutputType>Library</OutputType>
-    <LangVersion>latest</LangVersion>
-  </PropertyGroup>
-</Project>
