@@ -13,6 +13,8 @@ namespace WidescreenTools.Patches
         private const float VanillaZoomMax = 2f;
         private const float MinimumAllowedZoom = 0.1f;
         private const float MinimumRangeSpan = 0.01f;
+        private const float MinimumConfigMultiplier = 1f;
+        private const float MaximumConfigMultiplier = 4f;
         private const float ZoomOutSafetyPadding = 0f;
         private const int WorldViewSafetyMargin = 64;
 
@@ -21,9 +23,11 @@ namespace WidescreenTools.Patches
         private static FieldInfo _gameZoomTargetField;
         private static FieldInfo _renderTargetMaxSizeField;
         private static FieldInfo _targetSetField;
+        private static FieldInfo _fieldAttributesField;
         private static ConstructorInfo _pointConstructor;
         private static FieldInfo _dedServField;
         private static bool _initialized;
+        private static bool _attemptedInitOnlyClear;
         private static bool _capturedOriginal;
         private static object _originalValue;
         private static bool _customZoomRangeEnabled;
@@ -46,6 +50,7 @@ namespace WidescreenTools.Patches
             _targetSetField = typeof(Main).GetField("targetSet", BindingFlags.Public | BindingFlags.Static);
             _pointConstructor = _maxWorldViewSizeField?.FieldType.GetConstructor(new[] { typeof(int), typeof(int) });
             _dedServField = typeof(Main).GetField("dedServ", BindingFlags.Public | BindingFlags.Static);
+            _fieldAttributesField = typeof(FieldInfo).GetField("m_fieldAttributes", BindingFlags.Instance | BindingFlags.NonPublic);
             _initialized = true;
 
             if (_maxWorldViewSizeField == null || _pointConstructor == null)
@@ -119,7 +124,7 @@ namespace WidescreenTools.Patches
 
         public static float ClampMultiplierForCurrentResolution(float requestedMultiplier, int screenWidth, int screenHeight, out float maxAllowedMultiplier, out float minZoomLimit)
         {
-            maxAllowedMultiplier = 4f;
+            maxAllowedMultiplier = MaximumConfigMultiplier;
             minZoomLimit = MinimumAllowedZoom;
             float sanitized = SanitizeMultiplier(requestedMultiplier);
 
@@ -148,14 +153,14 @@ namespace WidescreenTools.Patches
             }
 
             maxAllowedMultiplier = 2f * (1.5f - minZoomLimit);
-            if (maxAllowedMultiplier < 0.1f)
+            if (maxAllowedMultiplier < MinimumConfigMultiplier)
             {
-                maxAllowedMultiplier = 0.1f;
+                maxAllowedMultiplier = MinimumConfigMultiplier;
             }
 
-            if (maxAllowedMultiplier > 4f)
+            if (maxAllowedMultiplier > MaximumConfigMultiplier)
             {
-                maxAllowedMultiplier = 4f;
+                maxAllowedMultiplier = MaximumConfigMultiplier;
             }
 
             if (sanitized > maxAllowedMultiplier)
@@ -370,11 +375,11 @@ namespace WidescreenTools.Patches
             {
                 try
                 {
-                    var attributesField = typeof(FieldInfo).GetField("m_fieldAttributes", BindingFlags.Instance | BindingFlags.NonPublic);
-                    if (attributesField != null)
+                    if (!_attemptedInitOnlyClear && _fieldAttributesField != null)
                     {
-                        var attributes = (FieldAttributes)attributesField.GetValue(_maxWorldViewSizeField);
-                        attributesField.SetValue(_maxWorldViewSizeField, attributes & ~FieldAttributes.InitOnly);
+                        var attributes = (FieldAttributes)_fieldAttributesField.GetValue(_maxWorldViewSizeField);
+                        _fieldAttributesField.SetValue(_maxWorldViewSizeField, attributes & ~FieldAttributes.InitOnly);
+                        _attemptedInitOnlyClear = true;
                     }
 
                     _maxWorldViewSizeField.SetValue(null, value);
@@ -424,17 +429,17 @@ namespace WidescreenTools.Patches
         {
             if (float.IsNaN(multiplier) || float.IsInfinity(multiplier))
             {
-                return 1f;
+                return MinimumConfigMultiplier;
             }
 
-            if (multiplier < 0.1f)
+            if (multiplier < MinimumConfigMultiplier)
             {
-                return 0.1f;
+                return MinimumConfigMultiplier;
             }
 
-            if (multiplier > 10f)
+            if (multiplier > MaximumConfigMultiplier)
             {
-                return 10f;
+                return MaximumConfigMultiplier;
             }
 
             return multiplier;
@@ -481,7 +486,15 @@ namespace WidescreenTools.Patches
             {
             }
 
-            return 6186;
+            // Fallback from current game state rather than a fixed magic number.
+            int fallbackWidth = Main.screenWidth > 0 ? Main.screenWidth : VanillaWidth;
+            int fallback = fallbackWidth + 200 * 2 * fallbackWidth / 1920;
+            if (fallback < 4096)
+            {
+                fallback = 4096;
+            }
+
+            return fallback;
         }
     }
 }

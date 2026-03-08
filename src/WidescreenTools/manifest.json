@@ -1,7 +1,7 @@
 {
   "id": "widescreen-tools",
   "name": "Widescreen Tools",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "nabagaca",
   "description": "Experimental widescreen support that relaxes Terraria's forced minimum zoom for ultrawide displays.",
   "entry_dll": "WidescreenTools.dll",

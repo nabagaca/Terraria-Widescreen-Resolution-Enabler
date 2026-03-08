@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using Terraria;
 using TerrariaModder.Core;
 using TerrariaModder.Core.Events;
@@ -13,7 +14,7 @@ namespace WidescreenTools
 
         public string Id => "widescreen-tools";
         public string Name => "Widescreen Tools";
-        public string Version => "0.1.0";
+        public string Version => "0.3.0";
 
         private ILogger _log;
         private ModContext _context;
@@ -35,6 +36,7 @@ namespace WidescreenTools
         private bool _resolutionOverridesApplied;
         private int _lastAppliedWorldViewWidth = -1;
         private int _lastAppliedWorldViewHeight = -1;
+        private MethodInfo _setResolutionMethod;
 
         public void Initialize(ModContext context)
         {
@@ -44,6 +46,7 @@ namespace WidescreenTools
 
             WidescreenZoomOverride.Initialize(_log);
             WidescreenResolutionOverride.Initialize(_log);
+            _setResolutionMethod = typeof(Main).GetMethod("SetResolution", new[] { typeof(int), typeof(int) });
             LoadConfigValues();
             ApplyResolutionOverrides(force: true);
             FrameEvents.OnPostUpdate += OnPostUpdate;
@@ -138,7 +141,7 @@ namespace WidescreenTools
                 {
                     _lastAppliedWorldViewWidth = worldViewWidth;
                     _lastAppliedWorldViewHeight = worldViewHeight;
-                _log.Info($"[WidescreenTools] Forced minimum zoom comparer set to {worldViewWidth}x{worldViewHeight}");
+                    _log.Info($"[WidescreenTools] Forced minimum zoom comparer set to {worldViewWidth}x{worldViewHeight}");
                 }
             }
         }
@@ -264,14 +267,13 @@ namespace WidescreenTools
         {
             try
             {
-                var setResolution = typeof(Main).GetMethod("SetResolution", new[] { typeof(int), typeof(int) });
-                if (setResolution == null)
+                if (_setResolutionMethod == null)
                 {
                     _log.Warn("[WidescreenTools] Failed to find Main.SetResolution(int, int)");
                     return false;
                 }
 
-                setResolution.Invoke(null, new object[] { width, height });
+                _setResolutionMethod.Invoke(null, new object[] { width, height });
                 return true;
             }
             catch (Exception ex)

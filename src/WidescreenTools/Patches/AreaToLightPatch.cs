@@ -7,12 +7,6 @@ namespace WidescreenTools.Patches
     [HarmonyPatch(typeof(Main), "GetAreaToLight")]
     internal static class AreaToLightPatch
     {
-        internal static bool HasExpandedAreaToLight { get; private set; }
-        internal static int ExpansionCount { get; private set; }
-        internal static float LastRevealFactor { get; private set; }
-        internal static int LastWidth { get; private set; }
-        internal static int LastHeight { get; private set; }
-
         [HarmonyPostfix]
         private static void GetAreaToLight_Postfix(ref Rectangle __result)
         {
@@ -88,11 +82,6 @@ namespace WidescreenTools.Patches
             }
 
             __result = new Rectangle(left, top, right - left, bottom - top);
-            HasExpandedAreaToLight = true;
-            ExpansionCount++;
-            LastRevealFactor = Main.screenWidth > 0 ? Main.MaxWorldViewSize.X / (float)Main.screenWidth : 1f;
-            LastWidth = __result.Width;
-            LastHeight = __result.Height;
         }
     }
 }
