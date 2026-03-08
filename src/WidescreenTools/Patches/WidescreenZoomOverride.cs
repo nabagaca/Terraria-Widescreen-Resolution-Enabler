@@ -186,6 +186,11 @@ namespace WidescreenTools.Patches
             return _customZoomRangeEnabled;
         }
 
+        public static int GetCurrentRenderTargetMaxSize()
+        {
+            return GetRenderTargetMaxSize();
+        }
+
         public static float ClampZoomTarget(float target)
         {
             if (target < VanillaZoomMin)

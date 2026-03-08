@@ -34,6 +34,16 @@ namespace WidescreenTools
         private int _lastObservedWidth;
         private int _lastObservedHeight;
         private bool _resolutionOverridesApplied;
+        private bool _worldViewApplyDirty = true;
+        private bool _pendingResolutionSave;
+        private DateTime _lastResolutionChangeUtc;
+        private float _lastClampRequestedMultiplier = float.NaN;
+        private int _lastClampReferenceWidth = -1;
+        private int _lastClampReferenceHeight = -1;
+        private int _lastClampRenderTargetMax = -1;
+        private float _lastClampEffectiveMultiplier = float.NaN;
+        private float _lastClampMaxAllowedMultiplier = float.NaN;
+        private float _lastClampMinZoomLimit = float.NaN;
         private int _lastAppliedWorldViewWidth = -1;
         private int _lastAppliedWorldViewHeight = -1;
         private MethodInfo _setResolutionMethod;
@@ -48,7 +58,6 @@ namespace WidescreenTools
             WidescreenResolutionOverride.Initialize(_log);
             _setResolutionMethod = typeof(Main).GetMethod("SetResolution", new[] { typeof(int), typeof(int) });
             LoadConfigValues();
-            ApplyResolutionOverrides(force: true);
             FrameEvents.OnPostUpdate += OnPostUpdate;
 
             _log.Info($"{Name} v{Version} initialized");
@@ -57,11 +66,13 @@ namespace WidescreenTools
         public void OnWorldLoad()
         {
             _pendingApply = true;
+            _worldViewApplyDirty = true;
         }
 
         public void OnWorldUnload()
         {
             _pendingApply = true;
+            _worldViewApplyDirty = true;
         }
 
         public void Unload()
@@ -75,6 +86,7 @@ namespace WidescreenTools
         {
             LoadConfigValues();
             _pendingApply = true;
+            _worldViewApplyDirty = true;
         }
 
         private void OnPostUpdate()
@@ -86,6 +98,7 @@ namespace WidescreenTools
             }
 
             TrackResolutionChanges();
+            FlushPendingResolutionSave();
         }
 
         private void LoadConfigValues()
@@ -127,6 +140,7 @@ namespace WidescreenTools
             {
                 WidescreenZoomOverride.RestoreOriginal();
                 _log.Info("[WidescreenTools] Forced minimum zoom override disabled");
+                _worldViewApplyDirty = true;
                 return;
             }
 
@@ -135,8 +149,16 @@ namespace WidescreenTools
             worldViewWidth = WidescreenZoomOverride.ExpandWorldViewWidthForZoom(worldViewWidth, Main.screenWidth);
             worldViewHeight = WidescreenZoomOverride.ExpandWorldViewHeightForZoom(worldViewHeight, Main.screenHeight);
 
+            if (!_worldViewApplyDirty &&
+                _lastAppliedWorldViewWidth == worldViewWidth &&
+                _lastAppliedWorldViewHeight == worldViewHeight)
+            {
+                return;
+            }
+
             if (WidescreenZoomOverride.Apply(worldViewWidth, worldViewHeight))
             {
+                _worldViewApplyDirty = false;
                 if (_lastAppliedWorldViewWidth != worldViewWidth || _lastAppliedWorldViewHeight != worldViewHeight)
                 {
                     _lastAppliedWorldViewWidth = worldViewWidth;
@@ -151,12 +173,39 @@ namespace WidescreenTools
             int clampReferenceWidth = Math.Max(Main.screenWidth, _desiredResolutionWidth);
             int clampReferenceHeight = Math.Max(Main.screenHeight, _desiredResolutionHeight);
             float requestedMultiplier = _zoomRangeMultiplier;
-            float effectiveMultiplier = WidescreenZoomOverride.ClampMultiplierForCurrentResolution(
-                requestedMultiplier,
-                clampReferenceWidth,
-                clampReferenceHeight,
-                out float maxAllowedMultiplier,
-                out float minZoomLimit);
+            int renderTargetMax = WidescreenZoomOverride.GetCurrentRenderTargetMaxSize();
+            bool clampInputsChanged =
+                Math.Abs(_lastClampRequestedMultiplier - requestedMultiplier) > 0.0001f ||
+                _lastClampReferenceWidth != clampReferenceWidth ||
+                _lastClampReferenceHeight != clampReferenceHeight ||
+                _lastClampRenderTargetMax != renderTargetMax;
+
+            float effectiveMultiplier;
+            float maxAllowedMultiplier;
+            float minZoomLimit;
+            if (clampInputsChanged)
+            {
+                effectiveMultiplier = WidescreenZoomOverride.ClampMultiplierForCurrentResolution(
+                    requestedMultiplier,
+                    clampReferenceWidth,
+                    clampReferenceHeight,
+                    out maxAllowedMultiplier,
+                    out minZoomLimit);
+
+                _lastClampRequestedMultiplier = requestedMultiplier;
+                _lastClampReferenceWidth = clampReferenceWidth;
+                _lastClampReferenceHeight = clampReferenceHeight;
+                _lastClampRenderTargetMax = renderTargetMax;
+                _lastClampEffectiveMultiplier = effectiveMultiplier;
+                _lastClampMaxAllowedMultiplier = maxAllowedMultiplier;
+                _lastClampMinZoomLimit = minZoomLimit;
+            }
+            else
+            {
+                effectiveMultiplier = _lastClampEffectiveMultiplier;
+                maxAllowedMultiplier = _lastClampMaxAllowedMultiplier;
+                minZoomLimit = _lastClampMinZoomLimit;
+            }
 
             if (effectiveMultiplier < requestedMultiplier - 0.0001f &&
                 (float.IsNaN(_effectiveZoomRangeMultiplier) || Math.Abs(_effectiveZoomRangeMultiplier - effectiveMultiplier) > 0.0001f))
@@ -239,6 +288,9 @@ namespace WidescreenTools
             _lastObservedWidth = Main.screenWidth;
             _lastObservedHeight = Main.screenHeight;
             _pendingApply = true;
+            _worldViewApplyDirty = true;
+            _pendingResolutionSave = true;
+            _lastResolutionChangeUtc = DateTime.UtcNow;
 
             if (!_enabled || !_unlockHighResModes || !_persistResolution || _context?.Config == null)
             {
@@ -257,6 +309,32 @@ namespace WidescreenTools
 
             _desiredResolutionWidth = Main.screenWidth;
             _desiredResolutionHeight = Main.screenHeight;
+        }
+
+        private void FlushPendingResolutionSave()
+        {
+            if (!_pendingResolutionSave)
+            {
+                return;
+            }
+
+            if ((DateTime.UtcNow - _lastResolutionChangeUtc).TotalMilliseconds < 500)
+            {
+                return;
+            }
+
+            _pendingResolutionSave = false;
+
+            if (!_enabled || !_unlockHighResModes || !_persistResolution || _context?.Config == null)
+            {
+                return;
+            }
+
+            if (!_startupResolutionHandled || _desiredResolutionWidth <= 0 || _desiredResolutionHeight <= 0)
+            {
+                return;
+            }
+
             _context.Config.Set("desiredResolutionWidth", _desiredResolutionWidth);
             _context.Config.Set("desiredResolutionHeight", _desiredResolutionHeight);
             _context.Config.Save();
@@ -291,6 +369,11 @@ namespace WidescreenTools
             }
 
             ApplySavedResolution();
+        }
+
+        internal void NotifyResolutionOverridesApplied()
+        {
+            _resolutionOverridesApplied = true;
         }
 
         private static void SetPendingResolution(int width, int height)

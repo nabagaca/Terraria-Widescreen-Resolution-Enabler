@@ -9,9 +9,12 @@ namespace WidescreenTools.Patches
         [HarmonyPostfix]
         private static void CacheSupportedDisplaySizes_Postfix()
         {
-            WidescreenResolutionOverride.Apply();
+            if (WidescreenResolutionOverride.Apply())
+            {
+                Mod.Instance?.NotifyResolutionOverridesApplied();
+            }
+
             Mod.Instance?.ApplySavedResolutionFromCache();
         }
     }
 }
-
