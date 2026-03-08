@@ -23,6 +23,7 @@ namespace WidescreenTools
         private bool _unlockHighResModes;
         private bool _persistResolution;
         private float _zoomRangeMultiplier;
+        private float _effectiveZoomRangeMultiplier = float.NaN;
         private int _desiredResolutionWidth;
         private int _desiredResolutionHeight;
         private int _worldViewWidth;
@@ -31,9 +32,9 @@ namespace WidescreenTools
         private bool _startupResolutionHandled;
         private int _lastObservedWidth;
         private int _lastObservedHeight;
-        private bool _zoomDebugLogged;
-        private float _lastLoggedRawZoomTarget = float.NaN;
-        private float _lastLoggedMappedZoomTarget = float.NaN;
+        private bool _resolutionOverridesApplied;
+        private int _lastAppliedWorldViewWidth = -1;
+        private int _lastAppliedWorldViewHeight = -1;
 
         public void Initialize(ModContext context)
         {
@@ -44,7 +45,7 @@ namespace WidescreenTools
             WidescreenZoomOverride.Initialize(_log);
             WidescreenResolutionOverride.Initialize(_log);
             LoadConfigValues();
-            ApplyResolutionOverrides();
+            ApplyResolutionOverrides(force: true);
             FrameEvents.OnPostUpdate += OnPostUpdate;
 
             _log.Info($"{Name} v{Version} initialized");
@@ -52,10 +53,12 @@ namespace WidescreenTools
 
         public void OnWorldLoad()
         {
+            _pendingApply = true;
         }
 
         public void OnWorldUnload()
         {
+            _pendingApply = true;
         }
 
         public void Unload()
@@ -68,7 +71,6 @@ namespace WidescreenTools
         public void OnConfigChanged()
         {
             LoadConfigValues();
-            _zoomDebugLogged = false;
             _pendingApply = true;
         }
 
@@ -81,7 +83,6 @@ namespace WidescreenTools
             }
 
             TrackResolutionChanges();
-            LogZoomStateChanges();
         }
 
         private void LoadConfigValues()
@@ -101,22 +102,6 @@ namespace WidescreenTools
             _desiredResolutionHeight = _context.Config.Get("desiredResolutionHeight", 0);
             _worldViewWidth = _context.Config.Get("worldViewWidth", 5120);
             _worldViewHeight = _context.Config.Get("worldViewHeight", 1440);
-            int clampReferenceWidth = Math.Max(Main.screenWidth, _desiredResolutionWidth);
-            int clampReferenceHeight = Math.Max(Main.screenHeight, _desiredResolutionHeight);
-            float requestedMultiplier = _zoomRangeMultiplier;
-            _zoomRangeMultiplier = WidescreenZoomOverride.ClampMultiplierForCurrentResolution(
-                _zoomRangeMultiplier,
-                clampReferenceWidth,
-                clampReferenceHeight,
-                out float maxAllowedMultiplier,
-                out float minZoomLimit);
-
-            if (_zoomRangeMultiplier < requestedMultiplier - 0.0001f)
-            {
-                _log.Info($"[WidescreenTools] Clamped zoomRangeMultiplier {requestedMultiplier:0.###} -> {_zoomRangeMultiplier:0.###} for clamp reference {clampReferenceWidth}x{clampReferenceHeight} (min zoom limit ~{minZoomLimit:0.###}, max multiplier {maxAllowedMultiplier:0.###})");
-            }
-
-            WidescreenZoomOverride.ConfigureZoomRange(_enabled && _enableCustomZoomRange, _zoomRangeMultiplier);
 
             if (_worldViewWidth < WidescreenZoomOverride.VanillaWidth)
             {
@@ -131,8 +116,9 @@ namespace WidescreenTools
 
         private void ApplyConfiguredOverrides()
         {
-            ApplyResolutionOverrides();
+            ApplyResolutionOverrides(force: false);
             ApplySavedResolution();
+            ApplyEffectiveZoomRange();
 
             if (!_enabled || !_overrideForcedMinimumZoom)
             {
@@ -148,29 +134,54 @@ namespace WidescreenTools
 
             if (WidescreenZoomOverride.Apply(worldViewWidth, worldViewHeight))
             {
+                if (_lastAppliedWorldViewWidth != worldViewWidth || _lastAppliedWorldViewHeight != worldViewHeight)
+                {
+                    _lastAppliedWorldViewWidth = worldViewWidth;
+                    _lastAppliedWorldViewHeight = worldViewHeight;
                 _log.Info($"[WidescreenTools] Forced minimum zoom comparer set to {worldViewWidth}x{worldViewHeight}");
-            }
-
-            if (!_zoomDebugLogged)
-            {
-                _zoomDebugLogged = true;
-                _log.Info($"[WidescreenTools] Zoom range config: enabled={_enableCustomZoomRange}, multiplier={_zoomRangeMultiplier:0.###}, mappedRange={WidescreenZoomOverride.GetZoomTargetMin():0.###}-{WidescreenZoomOverride.GetZoomTargetMax():0.###}");
-                _log.Info($"[WidescreenTools] Lighting mode newEngine={Lighting.UsingNewLighting}");
-                _log.Info($"[WidescreenTools] Zoom setter hook adjusted={SpriteViewMatrixZoomSetterPatch.HasAdjustedGameViewZoom}, count={SpriteViewMatrixZoomSetterPatch.AdjustCount}");
-                _log.Info($"[WidescreenTools] InitTargets min->max replacements={InitTargetsPatch.ReplacedMinCalls}");
-                _log.Info($"[WidescreenTools] Tile draw range expanded={TileDrawAreaPatch.HasExpandedTileRange}, count={TileDrawAreaPatch.ExpansionCount}, lastFactor={TileDrawAreaPatch.LastRevealFactor:0.###}, lastTiles={TileDrawAreaPatch.LastExpandedWidth}x{TileDrawAreaPatch.LastExpandedHeight}");
-                _log.Info($"[WidescreenTools] AreaToLight expanded={AreaToLightPatch.HasExpandedAreaToLight}, count={AreaToLightPatch.ExpansionCount}, lastFactor={AreaToLightPatch.LastRevealFactor:0.###}, lastTiles={AreaToLightPatch.LastWidth}x{AreaToLightPatch.LastHeight}");
+                }
             }
         }
 
-        private void ApplyResolutionOverrides()
+        private void ApplyEffectiveZoomRange()
+        {
+            int clampReferenceWidth = Math.Max(Main.screenWidth, _desiredResolutionWidth);
+            int clampReferenceHeight = Math.Max(Main.screenHeight, _desiredResolutionHeight);
+            float requestedMultiplier = _zoomRangeMultiplier;
+            float effectiveMultiplier = WidescreenZoomOverride.ClampMultiplierForCurrentResolution(
+                requestedMultiplier,
+                clampReferenceWidth,
+                clampReferenceHeight,
+                out float maxAllowedMultiplier,
+                out float minZoomLimit);
+
+            if (effectiveMultiplier < requestedMultiplier - 0.0001f &&
+                (float.IsNaN(_effectiveZoomRangeMultiplier) || Math.Abs(_effectiveZoomRangeMultiplier - effectiveMultiplier) > 0.0001f))
+            {
+                _log.Info($"[WidescreenTools] Clamped zoomRangeMultiplier {requestedMultiplier:0.###} -> {effectiveMultiplier:0.###} for clamp reference {clampReferenceWidth}x{clampReferenceHeight} (min zoom limit ~{minZoomLimit:0.###}, max multiplier {maxAllowedMultiplier:0.###})");
+            }
+
+            _effectiveZoomRangeMultiplier = effectiveMultiplier;
+            WidescreenZoomOverride.ConfigureZoomRange(_enabled && _enableCustomZoomRange, effectiveMultiplier);
+        }
+
+        private void ApplyResolutionOverrides(bool force)
         {
             if (!_enabled || !_unlockHighResModes)
+            {
+                _resolutionOverridesApplied = false;
+                return;
+            }
+
+            if (!force && _resolutionOverridesApplied)
             {
                 return;
             }
 
-            WidescreenResolutionOverride.Apply();
+            if (WidescreenResolutionOverride.Apply())
+            {
+                _resolutionOverridesApplied = true;
+            }
         }
 
         private void ApplySavedResolution()
@@ -247,30 +258,6 @@ namespace WidescreenTools
             _context.Config.Set("desiredResolutionHeight", _desiredResolutionHeight);
             _context.Config.Save();
             _log.Info($"[WidescreenTools] Saved resolution {_desiredResolutionWidth}x{_desiredResolutionHeight}");
-        }
-
-        private void LogZoomStateChanges()
-        {
-            if (!_enabled || !_overrideForcedMinimumZoom || !WidescreenZoomOverride.IsCustomZoomRangeEnabled())
-            {
-                return;
-            }
-
-            float rawZoomTarget = WidescreenZoomOverride.GetCurrentGameZoomTarget();
-            float mappedZoomTarget = WidescreenZoomOverride.MapVanillaZoomToConfigured(rawZoomTarget);
-
-            if (Math.Abs(rawZoomTarget - _lastLoggedRawZoomTarget) < 0.0001f &&
-                Math.Abs(mappedZoomTarget - _lastLoggedMappedZoomTarget) < 0.0001f)
-            {
-                return;
-            }
-
-            _lastLoggedRawZoomTarget = rawZoomTarget;
-            _lastLoggedMappedZoomTarget = mappedZoomTarget;
-            _log.Info($"[WidescreenTools] Zoom target raw={rawZoomTarget:0.###} mapped={mappedZoomTarget:0.###} (range {WidescreenZoomOverride.GetZoomTargetMin():0.###}-{WidescreenZoomOverride.GetZoomTargetMax():0.###})");
-            _log.Info($"[WidescreenTools] Lighting mode newEngine={Lighting.UsingNewLighting}");
-            _log.Info($"[WidescreenTools] Tile draw expansion state: expanded={TileDrawAreaPatch.HasExpandedTileRange}, count={TileDrawAreaPatch.ExpansionCount}, factor={TileDrawAreaPatch.LastRevealFactor:0.###}, tiles={TileDrawAreaPatch.LastExpandedWidth}x{TileDrawAreaPatch.LastExpandedHeight}");
-            _log.Info($"[WidescreenTools] AreaToLight state: expanded={AreaToLightPatch.HasExpandedAreaToLight}, count={AreaToLightPatch.ExpansionCount}, factor={AreaToLightPatch.LastRevealFactor:0.###}, tiles={AreaToLightPatch.LastWidth}x{AreaToLightPatch.LastHeight}");
         }
 
         private bool TrySetResolution(int width, int height)

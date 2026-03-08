@@ -303,7 +303,6 @@ namespace WidescreenTools.Patches
                 }
 
                 _targetSetField.SetValue(null, false);
-                _log?.Info("[WidescreenTools] Requested render-target rebuild for updated world-view size");
             }
             catch (Exception ex)
             {
