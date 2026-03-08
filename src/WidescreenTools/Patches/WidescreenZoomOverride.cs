@@ -13,8 +13,7 @@ namespace WidescreenTools.Patches
         private const float VanillaZoomMax = 2f;
         private const float MinimumAllowedZoom = 0.1f;
         private const float MinimumRangeSpan = 0.01f;
-        private const int MaximumSafeRenderTargetSize = 8192;
-        private const int DefaultOffscreenRange = 192;
+        private const float ZoomOutSafetyPadding = 0f;
         private const int WorldViewSafetyMargin = 64;
 
         private static ILogger _log;
@@ -118,6 +117,55 @@ namespace WidescreenTools.Patches
             ClampCurrentZoomTarget();
         }
 
+        public static float ClampMultiplierForCurrentResolution(float requestedMultiplier, int screenWidth, int screenHeight, out float maxAllowedMultiplier, out float minZoomLimit)
+        {
+            maxAllowedMultiplier = 4f;
+            minZoomLimit = MinimumAllowedZoom;
+            float sanitized = SanitizeMultiplier(requestedMultiplier);
+
+            int maxAxis = GetMaximumSafeWorldViewAxis();
+            if (screenWidth <= 0 || maxAxis <= 0)
+            {
+                return sanitized;
+            }
+
+            float widthMinZoom = screenWidth / (float)maxAxis;
+            float heightMinZoom = 0f;
+            if (screenHeight > 0)
+            {
+                heightMinZoom = screenHeight / (float)maxAxis;
+            }
+
+            minZoomLimit = Math.Max(widthMinZoom, heightMinZoom) + ZoomOutSafetyPadding;
+            if (minZoomLimit < MinimumAllowedZoom)
+            {
+                minZoomLimit = MinimumAllowedZoom;
+            }
+
+            if (minZoomLimit > VanillaZoomMax)
+            {
+                minZoomLimit = VanillaZoomMax;
+            }
+
+            maxAllowedMultiplier = 2f * (1.5f - minZoomLimit);
+            if (maxAllowedMultiplier < 0.1f)
+            {
+                maxAllowedMultiplier = 0.1f;
+            }
+
+            if (maxAllowedMultiplier > 4f)
+            {
+                maxAllowedMultiplier = 4f;
+            }
+
+            if (sanitized > maxAllowedMultiplier)
+            {
+                return maxAllowedMultiplier;
+            }
+
+            return sanitized;
+        }
+
         public static float GetZoomTargetMin()
         {
             return _zoomTargetMin;
@@ -157,25 +205,7 @@ namespace WidescreenTools.Patches
             }
 
             float normalized = clampedVanilla - VanillaZoomMin;
-            float minFactor = _zoomTargetMin;
-            if (minFactor < MinimumAllowedZoom)
-            {
-                minFactor = MinimumAllowedZoom;
-            }
-
-            float maxFactor = _zoomTargetMax;
-            if (maxFactor < minFactor)
-            {
-                maxFactor = minFactor;
-            }
-
-            float ratio = maxFactor / minFactor;
-            if (ratio < 1f)
-            {
-                ratio = 1f;
-            }
-
-            return 1f + (ratio - 1f) * normalized;
+            return _zoomTargetMin + (_zoomTargetMax - _zoomTargetMin) * normalized;
         }
 
         public static float GetCurrentGameZoomTarget()
@@ -292,21 +322,10 @@ namespace WidescreenTools.Patches
             {
                 int offscreen = Main.offScreenRange > 0 ? Main.offScreenRange : 192;
                 int required = Math.Max(worldViewWidth, worldViewHeight) + offscreen * 2 + 64;
-                if (required > MaximumSafeRenderTargetSize)
-                {
-                    required = MaximumSafeRenderTargetSize;
-                }
 
                 if (!(_renderTargetMaxSizeField.GetValue(null) is int current))
                 {
                     return;
-                }
-
-                if (current > MaximumSafeRenderTargetSize)
-                {
-                    _renderTargetMaxSizeField.SetValue(null, MaximumSafeRenderTargetSize);
-                    _log?.Info($"[WidescreenTools] Lowered _renderTargetMaxSize {current} -> {MaximumSafeRenderTargetSize}");
-                    current = MaximumSafeRenderTargetSize;
                 }
 
                 if (required <= current)
@@ -314,12 +333,11 @@ namespace WidescreenTools.Patches
                     return;
                 }
 
-                _renderTargetMaxSizeField.SetValue(null, required);
-                _log?.Info($"[WidescreenTools] Raised _renderTargetMaxSize {current} -> {required}");
+                _log?.Warn($"[WidescreenTools] Requested world-view needs render target size {required}, but current _renderTargetMaxSize is {current}; limiting zoom extension to hardware-safe range");
             }
             catch (Exception ex)
             {
-                _log?.Warn($"[WidescreenTools] Failed to raise _renderTargetMaxSize: {ex.Message}");
+                _log?.Warn($"[WidescreenTools] Failed to inspect _renderTargetMaxSize: {ex.Message}");
             }
         }
 
@@ -425,7 +443,7 @@ namespace WidescreenTools.Patches
 
         private static int ClampWorldViewAxis(int requestedAxis)
         {
-            int maxAxis = MaximumSafeRenderTargetSize - DefaultOffscreenRange * 2 - WorldViewSafetyMargin;
+            int maxAxis = GetMaximumSafeWorldViewAxis();
             if (maxAxis < 1)
             {
                 maxAxis = 1;
@@ -437,6 +455,34 @@ namespace WidescreenTools.Patches
             }
 
             return requestedAxis;
+        }
+
+        private static int GetMaximumSafeWorldViewAxis()
+        {
+            int maxRenderTargetSize = GetRenderTargetMaxSize();
+            int maxAxis = maxRenderTargetSize - WorldViewSafetyMargin;
+            if (maxAxis < 1)
+            {
+                maxAxis = 1;
+            }
+
+            return maxAxis;
+        }
+
+        private static int GetRenderTargetMaxSize()
+        {
+            try
+            {
+                if (_renderTargetMaxSizeField?.GetValue(null) is int value && value > 0)
+                {
+                    return value;
+                }
+            }
+            catch
+            {
+            }
+
+            return 6186;
         }
     }
 }

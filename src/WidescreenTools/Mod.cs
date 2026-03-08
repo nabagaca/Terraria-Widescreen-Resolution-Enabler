@@ -3,7 +3,6 @@ using Terraria;
 using TerrariaModder.Core;
 using TerrariaModder.Core.Events;
 using TerrariaModder.Core.Logging;
-using Terraria.Graphics.Light;
 using WidescreenTools.Patches;
 
 namespace WidescreenTools
@@ -102,6 +101,21 @@ namespace WidescreenTools
             _desiredResolutionHeight = _context.Config.Get("desiredResolutionHeight", 0);
             _worldViewWidth = _context.Config.Get("worldViewWidth", 5120);
             _worldViewHeight = _context.Config.Get("worldViewHeight", 1440);
+            int clampReferenceWidth = Math.Max(Main.screenWidth, _desiredResolutionWidth);
+            int clampReferenceHeight = Math.Max(Main.screenHeight, _desiredResolutionHeight);
+            float requestedMultiplier = _zoomRangeMultiplier;
+            _zoomRangeMultiplier = WidescreenZoomOverride.ClampMultiplierForCurrentResolution(
+                _zoomRangeMultiplier,
+                clampReferenceWidth,
+                clampReferenceHeight,
+                out float maxAllowedMultiplier,
+                out float minZoomLimit);
+
+            if (_zoomRangeMultiplier < requestedMultiplier - 0.0001f)
+            {
+                _log.Info($"[WidescreenTools] Clamped zoomRangeMultiplier {requestedMultiplier:0.###} -> {_zoomRangeMultiplier:0.###} for clamp reference {clampReferenceWidth}x{clampReferenceHeight} (min zoom limit ~{minZoomLimit:0.###}, max multiplier {maxAllowedMultiplier:0.###})");
+            }
+
             WidescreenZoomOverride.ConfigureZoomRange(_enabled && _enableCustomZoomRange, _zoomRangeMultiplier);
 
             if (_worldViewWidth < WidescreenZoomOverride.VanillaWidth)
@@ -119,7 +133,6 @@ namespace WidescreenTools
         {
             ApplyResolutionOverrides();
             ApplySavedResolution();
-            EnsureLightingModeForExtendedZoom();
 
             if (!_enabled || !_overrideForcedMinimumZoom)
             {
@@ -258,29 +271,6 @@ namespace WidescreenTools
             _log.Info($"[WidescreenTools] Lighting mode newEngine={Lighting.UsingNewLighting}");
             _log.Info($"[WidescreenTools] Tile draw expansion state: expanded={TileDrawAreaPatch.HasExpandedTileRange}, count={TileDrawAreaPatch.ExpansionCount}, factor={TileDrawAreaPatch.LastRevealFactor:0.###}, tiles={TileDrawAreaPatch.LastExpandedWidth}x{TileDrawAreaPatch.LastExpandedHeight}");
             _log.Info($"[WidescreenTools] AreaToLight state: expanded={AreaToLightPatch.HasExpandedAreaToLight}, count={AreaToLightPatch.ExpansionCount}, factor={AreaToLightPatch.LastRevealFactor:0.###}, tiles={AreaToLightPatch.LastWidth}x{AreaToLightPatch.LastHeight}");
-        }
-
-        private void EnsureLightingModeForExtendedZoom()
-        {
-            if (!_enabled || !_enableCustomZoomRange)
-            {
-                return;
-            }
-
-            if (Lighting.UsingNewLighting)
-            {
-                return;
-            }
-
-            try
-            {
-                Lighting.Mode = LightMode.Color;
-                _log.Warn("[WidescreenTools] Switched Lighting.Mode to Color for extended zoom support");
-            }
-            catch (Exception ex)
-            {
-                _log.Warn($"[WidescreenTools] Failed to switch Lighting.Mode to Color: {ex.Message}");
-            }
         }
 
         private bool TrySetResolution(int width, int height)
