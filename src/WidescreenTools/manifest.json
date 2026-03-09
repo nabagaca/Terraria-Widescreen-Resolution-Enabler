@@ -49,32 +49,16 @@
       "default": 0,
       "min": 0,
       "max": 8192,
-      "label": "Saved Resolution Width",
-      "description": "Last widescreen resolution width saved by the mod"
+      "label": "Resolution Width",
+      "description": "Target display resolution width; also used as the world-view zoom reference. 0 = use native display resolution. Saved automatically when you change resolution in-game."
     },
     "desiredResolutionHeight": {
       "type": "int",
       "default": 0,
       "min": 0,
       "max": 8192,
-      "label": "Saved Resolution Height",
-      "description": "Last widescreen resolution height saved by the mod"
-    },
-    "worldViewWidth": {
-      "type": "int",
-      "default": 5120,
-      "min": 3839,
-      "max": 8192,
-      "label": "World View Width",
-      "description": "Reference world-view width used when computing the minimum zoom"
-    },
-    "worldViewHeight": {
-      "type": "int",
-      "default": 1440,
-      "min": 1200,
-      "max": 8192,
-      "label": "World View Height",
-      "description": "Reference world-view height used when computing the minimum zoom"
+      "label": "Resolution Height",
+      "description": "Target display resolution height; also used as the world-view zoom reference. 0 = use native display resolution. Saved automatically when you change resolution in-game."
     }
   }
 }

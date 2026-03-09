@@ -1,5 +1,6 @@
 using System;
 using System.Reflection;
+using System.Windows.Forms;
 using Terraria;
 using TerrariaModder.Core;
 using TerrariaModder.Core.Events;
@@ -116,8 +117,21 @@ namespace WidescreenTools
             _zoomRangeMultiplier = _context.Config.Get("zoomRangeMultiplier", 1f);
             _desiredResolutionWidth = _context.Config.Get("desiredResolutionWidth", 0);
             _desiredResolutionHeight = _context.Config.Get("desiredResolutionHeight", 0);
-            _worldViewWidth = _context.Config.Get("worldViewWidth", 5120);
-            _worldViewHeight = _context.Config.Get("worldViewHeight", 1440);
+
+            // Derive the world-view zoom reference from the desired resolution.
+            // When no resolution is configured (0), fall back to the native display size.
+            _worldViewWidth = _desiredResolutionWidth;
+            _worldViewHeight = _desiredResolutionHeight;
+
+            if (_worldViewWidth <= 0 || _worldViewHeight <= 0)
+            {
+                var primary = Screen.PrimaryScreen;
+                if (primary != null)
+                {
+                    if (_worldViewWidth <= 0) _worldViewWidth = primary.Bounds.Width;
+                    if (_worldViewHeight <= 0) _worldViewHeight = primary.Bounds.Height;
+                }
+            }
 
             if (_worldViewWidth < WidescreenZoomOverride.VanillaWidth)
             {
