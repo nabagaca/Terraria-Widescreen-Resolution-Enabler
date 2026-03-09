@@ -1,5 +1,6 @@
 using System;
 using System.Reflection;
+using System.Windows.Forms;
 using Terraria;
 using TerrariaModder.Core;
 using TerrariaModder.Core.Events;
@@ -42,8 +43,6 @@ namespace WidescreenTools
         private int _lastClampReferenceHeight = -1;
         private int _lastClampRenderTargetMax = -1;
         private float _lastClampEffectiveMultiplier = float.NaN;
-        private float _lastClampMaxAllowedMultiplier = float.NaN;
-        private float _lastClampMinZoomLimit = float.NaN;
         private int _lastAppliedWorldViewWidth = -1;
         private int _lastAppliedWorldViewHeight = -1;
         private MethodInfo _setResolutionMethod;
@@ -116,8 +115,21 @@ namespace WidescreenTools
             _zoomRangeMultiplier = _context.Config.Get("zoomRangeMultiplier", 1f);
             _desiredResolutionWidth = _context.Config.Get("desiredResolutionWidth", 0);
             _desiredResolutionHeight = _context.Config.Get("desiredResolutionHeight", 0);
-            _worldViewWidth = _context.Config.Get("worldViewWidth", 5120);
-            _worldViewHeight = _context.Config.Get("worldViewHeight", 1440);
+
+            // Derive the world-view zoom reference from the desired resolution.
+            // When no resolution is configured (0), fall back to the native display size.
+            _worldViewWidth = _desiredResolutionWidth;
+            _worldViewHeight = _desiredResolutionHeight;
+
+            if (_worldViewWidth <= 0 || _worldViewHeight <= 0)
+            {
+                var primary = Screen.PrimaryScreen;
+                if (primary != null)
+                {
+                    if (_worldViewWidth <= 0) _worldViewWidth = primary.Bounds.Width;
+                    if (_worldViewHeight <= 0) _worldViewHeight = primary.Bounds.Height;
+                }
+            }
 
             if (_worldViewWidth < WidescreenZoomOverride.VanillaWidth)
             {
@@ -192,36 +204,30 @@ namespace WidescreenTools
                 _lastClampRenderTargetMax != renderTargetMax;
 
             float effectiveMultiplier;
-            float maxAllowedMultiplier;
-            float minZoomLimit;
             if (clampInputsChanged)
             {
                 effectiveMultiplier = WidescreenZoomOverride.ClampMultiplierForCurrentResolution(
                     requestedMultiplier,
                     clampReferenceWidth,
                     clampReferenceHeight,
-                    out maxAllowedMultiplier,
-                    out minZoomLimit);
+                    out _,
+                    out _);
 
                 _lastClampRequestedMultiplier = requestedMultiplier;
                 _lastClampReferenceWidth = clampReferenceWidth;
                 _lastClampReferenceHeight = clampReferenceHeight;
                 _lastClampRenderTargetMax = renderTargetMax;
                 _lastClampEffectiveMultiplier = effectiveMultiplier;
-                _lastClampMaxAllowedMultiplier = maxAllowedMultiplier;
-                _lastClampMinZoomLimit = minZoomLimit;
             }
             else
             {
                 effectiveMultiplier = _lastClampEffectiveMultiplier;
-                maxAllowedMultiplier = _lastClampMaxAllowedMultiplier;
-                minZoomLimit = _lastClampMinZoomLimit;
             }
 
             if (effectiveMultiplier < requestedMultiplier - 0.0001f &&
                 (float.IsNaN(_effectiveZoomRangeMultiplier) || Math.Abs(_effectiveZoomRangeMultiplier - effectiveMultiplier) > 0.0001f))
             {
-                _log.Info($"[WidescreenTools] Clamped zoomRangeMultiplier {requestedMultiplier:0.###} -> {effectiveMultiplier:0.###} for clamp reference {clampReferenceWidth}x{clampReferenceHeight} (min zoom limit ~{minZoomLimit:0.###}, max multiplier {maxAllowedMultiplier:0.###})");
+                _log.Info($"[WidescreenTools] Clamped zoomRangeMultiplier {requestedMultiplier:0.###} -> {effectiveMultiplier:0.###} for clamp reference {clampReferenceWidth}x{clampReferenceHeight}");
             }
 
             _effectiveZoomRangeMultiplier = effectiveMultiplier;

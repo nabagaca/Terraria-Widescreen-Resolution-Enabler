@@ -84,7 +84,6 @@ namespace WidescreenTools.Patches
                 return false;
             }
 
-            EnsureRenderTargetCapacity(targetWidth, targetHeight);
             RequestRenderTargetRefresh();
             ClampCurrentZoomTarget();
             return true;
@@ -171,21 +170,6 @@ namespace WidescreenTools.Patches
             return sanitized;
         }
 
-        public static float GetZoomTargetMin()
-        {
-            return _zoomTargetMin;
-        }
-
-        public static float GetZoomTargetMax()
-        {
-            return _zoomTargetMax;
-        }
-
-        public static bool IsCustomZoomRangeEnabled()
-        {
-            return _customZoomRangeEnabled;
-        }
-
         public static bool HasExpandedZoomRange()
         {
             if (!_customZoomRangeEnabled)
@@ -226,27 +210,6 @@ namespace WidescreenTools.Patches
 
             float normalized = clampedVanilla - VanillaZoomMin;
             return _zoomTargetMin + (_zoomTargetMax - _zoomTargetMin) * normalized;
-        }
-
-        public static float GetCurrentGameZoomTarget()
-        {
-            if (_gameZoomTargetField == null)
-            {
-                return VanillaZoomMin;
-            }
-
-            try
-            {
-                if (_gameZoomTargetField.GetValue(null) is float target)
-                {
-                    return target;
-                }
-            }
-            catch
-            {
-            }
-
-            return VanillaZoomMin;
         }
 
         public static void ClampCurrentZoomTarget()
@@ -327,36 +290,6 @@ namespace WidescreenTools.Patches
             catch (Exception ex)
             {
                 _log?.Warn($"[WidescreenTools] Failed to request render-target rebuild: {ex.Message}");
-            }
-        }
-
-        private static void EnsureRenderTargetCapacity(int worldViewWidth, int worldViewHeight)
-        {
-            if (_renderTargetMaxSizeField == null)
-            {
-                return;
-            }
-
-            try
-            {
-                int offscreen = Main.offScreenRange > 0 ? Main.offScreenRange : 192;
-                int required = Math.Max(worldViewWidth, worldViewHeight) + offscreen * 2 + 64;
-
-                if (!(_renderTargetMaxSizeField.GetValue(null) is int current))
-                {
-                    return;
-                }
-
-                if (required <= current)
-                {
-                    return;
-                }
-
-                _log?.Warn($"[WidescreenTools] Requested world-view needs render target size {required}, but current _renderTargetMaxSize is {current}; limiting zoom extension to hardware-safe range");
-            }
-            catch (Exception ex)
-            {
-                _log?.Warn($"[WidescreenTools] Failed to inspect _renderTargetMaxSize: {ex.Message}");
             }
         }
 
