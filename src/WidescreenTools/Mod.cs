@@ -43,8 +43,6 @@ namespace WidescreenTools
         private int _lastClampReferenceHeight = -1;
         private int _lastClampRenderTargetMax = -1;
         private float _lastClampEffectiveMultiplier = float.NaN;
-        private float _lastClampMaxAllowedMultiplier = float.NaN;
-        private float _lastClampMinZoomLimit = float.NaN;
         private int _lastAppliedWorldViewWidth = -1;
         private int _lastAppliedWorldViewHeight = -1;
         private MethodInfo _setResolutionMethod;
@@ -206,36 +204,30 @@ namespace WidescreenTools
                 _lastClampRenderTargetMax != renderTargetMax;
 
             float effectiveMultiplier;
-            float maxAllowedMultiplier;
-            float minZoomLimit;
             if (clampInputsChanged)
             {
                 effectiveMultiplier = WidescreenZoomOverride.ClampMultiplierForCurrentResolution(
                     requestedMultiplier,
                     clampReferenceWidth,
                     clampReferenceHeight,
-                    out maxAllowedMultiplier,
-                    out minZoomLimit);
+                    out _,
+                    out _);
 
                 _lastClampRequestedMultiplier = requestedMultiplier;
                 _lastClampReferenceWidth = clampReferenceWidth;
                 _lastClampReferenceHeight = clampReferenceHeight;
                 _lastClampRenderTargetMax = renderTargetMax;
                 _lastClampEffectiveMultiplier = effectiveMultiplier;
-                _lastClampMaxAllowedMultiplier = maxAllowedMultiplier;
-                _lastClampMinZoomLimit = minZoomLimit;
             }
             else
             {
                 effectiveMultiplier = _lastClampEffectiveMultiplier;
-                maxAllowedMultiplier = _lastClampMaxAllowedMultiplier;
-                minZoomLimit = _lastClampMinZoomLimit;
             }
 
             if (effectiveMultiplier < requestedMultiplier - 0.0001f &&
                 (float.IsNaN(_effectiveZoomRangeMultiplier) || Math.Abs(_effectiveZoomRangeMultiplier - effectiveMultiplier) > 0.0001f))
             {
-                _log.Info($"[WidescreenTools] Clamped zoomRangeMultiplier {requestedMultiplier:0.###} -> {effectiveMultiplier:0.###} for clamp reference {clampReferenceWidth}x{clampReferenceHeight} (min zoom limit ~{minZoomLimit:0.###}, max multiplier {maxAllowedMultiplier:0.###})");
+                _log.Info($"[WidescreenTools] Clamped zoomRangeMultiplier {requestedMultiplier:0.###} -> {effectiveMultiplier:0.###} for clamp reference {clampReferenceWidth}x{clampReferenceHeight}");
             }
 
             _effectiveZoomRangeMultiplier = effectiveMultiplier;
