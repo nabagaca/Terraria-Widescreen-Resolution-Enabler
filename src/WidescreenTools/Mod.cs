@@ -3,13 +3,14 @@ using System.Reflection;
 using System.Windows.Forms;
 using Terraria;
 using TerrariaModder.Core;
+using TerrariaModder.Core.Config;
 using TerrariaModder.Core.Events;
 using TerrariaModder.Core.Logging;
 using WidescreenTools.Patches;
 
 namespace WidescreenTools
 {
-    public class Mod : IMod
+    public class Mod : IMod, IModLifecycle
     {
         internal static Mod Instance { get; private set; }
 
@@ -19,6 +20,7 @@ namespace WidescreenTools
 
         private ILogger _log;
         private ModContext _context;
+        private WidescreenToolsConfig _config;
         private bool _enabled;
         private bool _overrideForcedMinimumZoom;
         private bool _enableCustomZoomRange;
@@ -52,6 +54,7 @@ namespace WidescreenTools
             Instance = this;
             _log = context.Logger;
             _context = context;
+            _config = context.GetConfig<WidescreenToolsConfig>();
 
             WidescreenZoomOverride.Initialize(_log);
             WidescreenResolutionOverride.Initialize(_log);
@@ -66,6 +69,10 @@ namespace WidescreenTools
         {
             _pendingApply = true;
             _worldViewApplyDirty = true;
+        }
+
+        public void OnContentReady(ModContext context)
+        {
         }
 
         public void OnWorldUnload()
@@ -102,19 +109,28 @@ namespace WidescreenTools
 
         private void LoadConfigValues()
         {
-            if (_context?.Config == null)
+            if (_config == null)
             {
+                _enabled = true;
+                _overrideForcedMinimumZoom = true;
+                _enableCustomZoomRange = false;
+                _unlockHighResModes = true;
+                _persistResolution = true;
+                _zoomRangeMultiplier = 1f;
+                _desiredResolutionWidth = 0;
+                _desiredResolutionHeight = 0;
+
                 return;
             }
 
-            _enabled = _context.Config.Get("enabled", true);
-            _overrideForcedMinimumZoom = _context.Config.Get("overrideForcedMinimumZoom", true);
-            _enableCustomZoomRange = _context.Config.Get("enableCustomZoomRange", false);
-            _unlockHighResModes = _context.Config.Get("unlockHighResModes", true);
-            _persistResolution = _context.Config.Get("persistResolution", true);
-            _zoomRangeMultiplier = _context.Config.Get("zoomRangeMultiplier", 1f);
-            _desiredResolutionWidth = _context.Config.Get("desiredResolutionWidth", 0);
-            _desiredResolutionHeight = _context.Config.Get("desiredResolutionHeight", 0);
+            _enabled = _config.Enabled;
+            _overrideForcedMinimumZoom = _config.OverrideForcedMinimumZoom;
+            _enableCustomZoomRange = _config.EnableCustomZoomRange;
+            _unlockHighResModes = _config.UnlockHighResModes;
+            _persistResolution = _config.PersistResolution;
+            _zoomRangeMultiplier = _config.ZoomRangeMultiplier;
+            _desiredResolutionWidth = _config.DesiredResolutionWidth;
+            _desiredResolutionHeight = _config.DesiredResolutionHeight;
 
             // Derive the world-view zoom reference from the desired resolution.
             // When no resolution is configured (0), fall back to the native display size.
@@ -309,7 +325,7 @@ namespace WidescreenTools
             _pendingResolutionSave = true;
             _lastResolutionChangeUtc = DateTime.UtcNow;
 
-            if (!_enabled || !_unlockHighResModes || !_persistResolution || _context?.Config == null)
+            if (!_enabled || !_unlockHighResModes || !_persistResolution || _config == null)
             {
                 return;
             }
@@ -342,7 +358,7 @@ namespace WidescreenTools
 
             _pendingResolutionSave = false;
 
-            if (!_enabled || !_unlockHighResModes || !_persistResolution || _context?.Config == null)
+            if (!_enabled || !_unlockHighResModes || !_persistResolution || _config == null)
             {
                 return;
             }
@@ -352,9 +368,9 @@ namespace WidescreenTools
                 return;
             }
 
-            _context.Config.Set("desiredResolutionWidth", _desiredResolutionWidth);
-            _context.Config.Set("desiredResolutionHeight", _desiredResolutionHeight);
-            _context.Config.Save();
+            _config.DesiredResolutionWidth = _desiredResolutionWidth;
+            _config.DesiredResolutionHeight = _desiredResolutionHeight;
+            _config.Save();
             _log.Info($"[WidescreenTools] Saved resolution {_desiredResolutionWidth}x{_desiredResolutionHeight}");
         }
 
