@@ -40,6 +40,17 @@
     <None Include="manifest.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <Target Name="Package"
+          AfterTargets=""
+          DependsOnTargets="Build">
+    <PropertyGroup>
+      <_PackageDir>$(MSBuildProjectDirectory)\..\..\artifacts\package</_PackageDir>
+    </PropertyGroup>
+
+    <MakeDir Directories="$(_PackageDir)" />
+    <Exec Command="powershell -NoProfile -Command &quot;$v = (Get-Content '$(MSBuildProjectDirectory)\manifest.json' | ConvertFrom-Json).version; $dest = '$(_PackageDir)\widescreen-tools-' + $v + '.zip'; Compress-Archive -Force -Path '$(TargetPath)','$(MSBuildProjectDirectory)\manifest.json' -DestinationPath $dest; Write-Host ('Package written to ' + $dest)&quot;" />
+  </Target>
+
   <Target Name="DeployModToTerrariaModsFolder"
           AfterTargets="Build"
           Condition="'$(EnableTerrariaModderDeploy)' == 'true'
