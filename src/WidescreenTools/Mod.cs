@@ -16,7 +16,7 @@ namespace WidescreenTools
 
         public string Id => "widescreen-tools";
         public string Name => "Widescreen Tools";
-        public string Version => "0.4.2";
+        public string Version => "0.5.0";
 
         private ILogger _log;
         private ModContext _context;
