@@ -13,7 +13,8 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Dict
-from urllib import error, request
+from urllib import error, request, parse
+import zipfile
 
 NEXUS_API_BASE = "https://api.nexusmods.com/v3"
 
@@ -148,6 +149,27 @@ def find_zip(artifacts_dir: Path, assembly_name: str, version: str) -> Path:
     return matches[0]
 
 
+def create_zip_package(project_root: Path, artifacts_dir: Path, assembly_name: str, version: str) -> Path:
+    # Create a cross-platform zip containing a top-level 'widescreen-tools/' folder
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = artifacts_dir / f"{assembly_name}-v{version}.zip"
+
+    dll_path = project_root / "artifacts" / "bin" / f"{assembly_name}.dll"
+    manifest_path = project_root / "src" / "WidescreenTools" / "manifest.json"
+
+    if not dll_path.exists():
+        raise ScriptError(f"Built assembly not found: {dll_path}")
+    if not manifest_path.exists():
+        raise ScriptError(f"manifest.json not found: {manifest_path}")
+
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.write(dll_path, arcname=f"widescreen-tools/{dll_path.name}")
+        zf.write(manifest_path, arcname=f"widescreen-tools/{manifest_path.name}")
+
+    print(f"Created zip package: {zip_path}")
+    return zip_path
+
+
 def upload_to_nexus(file_path: Path, version: str, api_key: str, description_override: str | None = None) -> None:
     if not file_path.exists():
         raise ScriptError(f"File not found: {file_path}")
@@ -236,11 +258,79 @@ def upload_to_nexus(file_path: Path, version: str, api_key: str, description_ove
     print("\nUpload complete!")
 
 
+def create_github_release_and_upload(
+    file_path: Path,
+    version: str,
+    github_token: str,
+    github_repo: str,
+    description_override: str | None = None,
+) -> None:
+    if not file_path.exists():
+        raise ScriptError(f"File not found: {file_path}")
+
+    tag_name = f"v{version}"
+    release_name = f"Widescreen Tools v{version}"
+    body = description_override if description_override is not None else f"Release version {version}"
+
+    headers = {"Authorization": f"token {github_token}", "Accept": "application/vnd.github+json"}
+
+    print("Creating GitHub release...")
+    create_url = f"https://api.github.com/repos/{github_repo}/releases"
+    release_payload = {
+        "tag_name": tag_name,
+        "name": release_name,
+        "body": body,
+        "draft": False,
+        "prerelease": False,
+    }
+
+    try:
+        release_resp = api_request("POST", create_url, json_body=release_payload, extra_headers=headers)
+    except ScriptError as exc:
+        msg = str(exc)
+        if "HTTP 422" in msg:
+            print("Release tag already exists; locating existing release by tag...")
+            # Find existing release by tag
+            tag_url = f"https://api.github.com/repos/{github_repo}/releases/tags/{tag_name}"
+            release_resp = api_request("GET", tag_url, extra_headers=headers)
+        else:
+            raise
+
+    # Normalize response shape: Nexus uses {"data": {...}}, GitHub returns the object directly
+    if isinstance(release_resp, dict):
+        if "data" in release_resp and isinstance(release_resp.get("data"), dict):
+            release_data = release_resp["data"]
+        else:
+            release_data = release_resp
+    else:
+        release_data = release_resp
+
+    release_id = release_data.get("id")
+    upload_url_template = release_data.get("upload_url")
+    if not release_id or not upload_url_template:
+        raise ScriptError("Failed to obtain release id/upload_url from GitHub response")
+
+    # Upload asset
+    upload_base = upload_url_template.split("{")[0]
+    file_name = file_path.name
+    upload_url = f"{upload_base}?name={parse.quote(file_name)}"
+
+    print(f"Uploading {file_name} to GitHub release {release_name}...")
+    with file_path.open("rb") as fh:
+        file_bytes = fh.read()
+
+    asset_headers = {"Authorization": f"token {github_token}", "Content-Type": "application/zip", "Accept": "application/vnd.github+json"}
+    asset_resp = api_request("POST", upload_url, raw_body=file_bytes, extra_headers=asset_headers)
+    print("GitHub upload response:", asset_resp if isinstance(asset_resp, dict) else "(raw bytes)")
+    print("GitHub release asset upload complete")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build and upload Widescreen Tools to Nexus Mods")
     parser.add_argument("--build-configuration", default="Release", help="dotnet build configuration")
     parser.add_argument("--skip-build", action="store_true", help="Skip dotnet build")
     parser.add_argument("--skip-upload", action="store_true", help="Skip Nexus upload")
+    parser.add_argument("--skip-github", action="store_true", help="Skip creating GitHub release and upload")
     parser.add_argument("--description", help="Override uploaded file description")
     return parser.parse_args()
 
@@ -275,11 +365,33 @@ def main() -> int:
             run_build(csproj_file, args.build_configuration)
 
         assembly_name = get_assembly_name(csproj_file)
-        zip_file = find_zip(artifacts_dir, assembly_name, version)
+        try:
+            zip_file = find_zip(artifacts_dir, assembly_name, version)
+        except ScriptError:
+            if not args.skip_build:
+                # build just ran; attempt to create the zip from build outputs
+                print("Built zip not found — creating zip package cross-platform...")
+                create_zip_package(project_root, artifacts_dir, assembly_name, version)
+                zip_file = find_zip(artifacts_dir, assembly_name, version)
+            else:
+                # If build was skipped, still attempt to create zip (user may have built earlier)
+                print("Built zip not found — creating zip package from existing build outputs...")
+                create_zip_package(project_root, artifacts_dir, assembly_name, version)
+                zip_file = find_zip(artifacts_dir, assembly_name, version)
         print(f"Found built package: {zip_file.name}\n")
 
         if not args.skip_upload:
             upload_to_nexus(zip_file, version, api_key, args.description)
+
+        if not args.skip_github:
+            github_token = os.getenv("github_token", "")
+            github_repo = os.getenv("github_repo", "")
+            if not github_token:
+                raise ScriptError("github_token not found in .env file")
+            if not github_repo:
+                raise ScriptError("github_repo not found in .env file (format: owner/repo)")
+
+            create_github_release_and_upload(zip_file, version, github_token, github_repo, args.description)
 
         return 0
     except ScriptError as exc:
