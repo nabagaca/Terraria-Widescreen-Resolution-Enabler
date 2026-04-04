@@ -117,11 +117,31 @@ def get_mod_version(manifest_file: Path) -> str:
     return version
 
 
-def find_zip(artifacts_dir: Path, version: str) -> Path:
+def get_assembly_name(project_file: Path) -> str:
+    # Try to read <AssemblyName> from the csproj; fall back to the project filename stem.
+    try:
+        import xml.etree.ElementTree as ET
+
+        tree = ET.parse(str(project_file))
+        root = tree.getroot()
+        for elem in root.iter():
+            tag = elem.tag
+            if tag.endswith('AssemblyName'):
+                if elem.text and elem.text.strip():
+                    return elem.text.strip()
+    except Exception:
+        pass
+
+    return project_file.stem
+
+
+def find_zip(artifacts_dir: Path, assembly_name: str, version: str) -> Path:
     if not artifacts_dir.exists():
         raise ScriptError(f"Artifacts directory not found: {artifacts_dir}")
-
-    matches = sorted(artifacts_dir.glob(f"*-{version}.zip"), key=lambda p: p.stat().st_mtime, reverse=True)
+    # Use the same naming pattern as the csproj: {AssemblyName}-v{ModVersion}.zip
+    expected_name = f"{assembly_name}-v{version}.zip"
+    matches = [p for p in artifacts_dir.glob("*.zip") if p.name == expected_name]
+    matches = sorted(matches, key=lambda p: p.stat().st_mtime, reverse=True)
     if not matches:
         raise ScriptError(f"Built zip file not found in {artifacts_dir}")
 
@@ -233,7 +253,7 @@ def main() -> int:
 
     project_root = Path(__file__).resolve().parent
     env_file = project_root / ".env"
-    manifest_file = project_root / "src" / "manifest.json"
+    manifest_file = project_root / "src" / "WidescreenTools" / "manifest.json"
     csproj_file = project_root / "src" / "WidescreenTools" / "WidescreenTools.csproj"
     artifacts_dir = project_root / "artifacts"
 
@@ -254,7 +274,8 @@ def main() -> int:
         if not args.skip_build:
             run_build(csproj_file, args.build_configuration)
 
-        zip_file = find_zip(artifacts_dir, version)
+        assembly_name = get_assembly_name(csproj_file)
+        zip_file = find_zip(artifacts_dir, assembly_name, version)
         print(f"Found built package: {zip_file.name}\n")
 
         if not args.skip_upload:
