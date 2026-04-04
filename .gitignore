@@ -2,4 +2,5 @@ bin/
 obj/
 artifacts/
 .vs/
-
+.claude
+.env

@@ -15,6 +15,15 @@
     <XnaFrameworkPath Condition="'$(XnaFrameworkPath)' == ''">C:\Windows\Microsoft.NET\assembly\GAC_32\Microsoft.Xna.Framework\v4.0_4.0.0.0__842cf8be1de50553\Microsoft.Xna.Framework.dll</XnaFrameworkPath>
     <TerrariaModderDeployRoot Condition="'$(TerrariaModderDeployRoot)' == ''">$(TerrariaInstallDir)\TerrariaModder</TerrariaModderDeployRoot>
     <TerrariaModId Condition="'$(TerrariaModId)' == ''">widescreen-tools</TerrariaModId>
+    <!-- Read manifest.json (if present) and extract version to tag the zip filename -->
+    <_ManifestExists Condition="Exists('$(MSBuildProjectDirectory)\manifest.json')">true</_ManifestExists>
+    <_ManifestText Condition="'$(_ManifestExists)' == 'true'">$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)\manifest.json'))</_ManifestText>
+    <ModVersion Condition="'$(_ManifestExists)' == 'true'">$([System.Text.RegularExpressions.Regex]::Match($(_ManifestText), '"version"\s*:\s*"([^\"]+)"').Groups[1].Value)</ModVersion>
+    <ModVersion Condition="'$(_ManifestExists)' != 'true'">unknown</ModVersion>
+      <!-- zip output option: set /p:CreateZipPackage=true to create a zip after build -->
+    <ZipPackageOutputPath Condition="'$(CreateZipPackage)' == 'true'">..\..\artifacts\$(AssemblyName)-v$(ModVersion).zip</ZipPackageOutputPath>
+    <CreateZipPackage Condition="'$(CreateZipPackage)' == ''">false</CreateZipPackage>
+
   </PropertyGroup>
 
   <ItemGroup>
@@ -39,6 +48,15 @@
   <ItemGroup>
     <None Include="manifest.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <Target Name="PackageMod"
+          AfterTargets="Build"
+          Condition="'$(CreateZipPackage)' == 'true' and Exists('$(TargetDir)$(AssemblyName).dll') and Exists('$(MSBuildProjectDirectory)\manifest.json')">
+    <Message Text="Packing mod and manifest into $(ZipPackageOutputPath)" Importance="High" />
+    <MakeDir Directories="$(OutputPath)" />
+    <MakeDir Directories="$(MSBuildProjectDirectory)\artifacts" />
+    <Exec Command="powershell -NoProfile -NonInteractive -Command &quot;Remove-Item -LiteralPath '$(ZipPackageOutputPath)' -ErrorAction SilentlyContinue; Compress-Archive -Path '$(TargetDir)$(AssemblyName).dll','$(MSBuildProjectDirectory)\manifest.json' -DestinationPath '$(ZipPackageOutputPath)' -Force&quot;" />
+  </Target>
 
   <Target Name="DeployModToTerrariaModsFolder"
           AfterTargets="Build"
